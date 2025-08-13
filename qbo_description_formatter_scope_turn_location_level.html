@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QBO Description Formatter — Scope – Turn – Location – Level</title>
+  <style>
+    :root { --bg:#0b1020; --card:#131a33; --text:#e9ecf1; --muted:#9fb0cf; --accent:#7aa2ff; --ok:#7dffa0; }
+    *{box-sizing:border-box}
+    body{margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--text);}
+    header{padding:24px; border-bottom:1px solid #243054; background:linear-gradient(180deg,#0f1530, #0b1020)}
+    h1{margin:0; font-size:20px}
+    main{padding:20px; display:grid; gap:16px; grid-template-columns:1fr; max-width:1200px; margin:0 auto}
+    .card{background:var(--card); border:1px solid #222b4d; border-radius:16px; padding:16px; box-shadow:0 10px 20px rgba(0,0,0,.25)}
+    label{font-size:12px; color:var(--muted); display:block; margin-bottom:6px}
+    textarea{width:100%; min-height:220px; border-radius:12px; border:1px solid #2a3663; background:#0b1228; color:var(--text); padding:12px; font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; resize:vertical}
+    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center}
+    .controls{display:flex; gap:12px; flex-wrap:wrap}
+    button{background:var(--accent); color:#0b1020; border:none; border-radius:12px; padding:10px 14px; font-weight:600; cursor:pointer}
+    button.secondary{background:#1a2549; color:var(--text); border:1px solid #2a3663}
+    button.ghost{background:transparent; border:1px dashed #2a3663; color:var(--muted)}
+    input[type="file"]{display:none}
+    .hint{font-size:12px; color:var(--muted)}
+    .pill{border:1px solid #2a3663; padding:6px 10px; border-radius:999px; display:inline-flex; align-items:center; gap:8px}
+    .pill input{margin:0}
+    .grid{display:grid; gap:16px}
+    .two{grid-template-columns:1fr 1fr}
+    .out{min-height:260px}
+    footer{padding:16px; text-align:center; color:#6b7dab; font-size:12px}
+    .success{color:var(--ok)}
+    .error{color:#ff8585}
+    .small{font-size:12px}
+    .spacer{height:4px}
+    @media (max-width: 900px){ .two{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>QBO Description Formatter — Scope – Turn – Location – Level</h1>
+    <div class="hint small">Paste a table copied from Excel/Sheets (or upload CSV). Produces clean lines like: <em>Stair Case - Turn 1 - #1 - Bldg Type C1 Alt 1 - Level 2</em></div>
+  </header>
+
+  <main>
+    <section class="card grid two">
+      <div>
+        <label for="input">Paste raw table here (tab- or comma‑delimited). Headers can include: <strong>Scope</strong>, <strong>Location</strong>, <strong>Turn</strong>, <strong>Level</strong>.</label>
+        <textarea id="input" placeholder="Example:
+Scope	Material (Item)	Location	Turn	Level
+Stair Case	Labor Only - ...	#1 - Bldg Type C1 Alt 1	1	2
+..."></textarea>
+        <div class="row" style="margin-top:8px">
+          <label class="pill"><input id="expandSchem" type="checkbox" checked> Expand abbreviations (Schem→Scheme, Surr→Surrounds) in Scope</label>
+          <label class="pill"><input id="stripLocation" type="checkbox" checked> Trim trailing spaces in Location</label>
+          <label class="pill"><input id="dedupe" type="checkbox"> Remove duplicate output lines</label>
+        </div>
+        <div class="controls" style="margin-top:12px">
+          <button id="formatBtn">Format</button>
+          <button id="copyBtn" class="secondary">Copy Output</button>
+          <button id="downloadBtn" class="secondary">Download .txt</button>
+          <label for="file" class="pill" style="cursor:pointer">Upload CSV<input id="file" type="file" accept=".csv,text/csv"></label>
+        </div>
+        <div id="msg" class="hint"></div>
+      </div>
+      <div>
+        <label for="output">Formatted lines (ready to paste into QBO “DESCRIPTION”):</label>
+        <textarea id="output" class="out" readonly placeholder="Output will appear here…"></textarea>
+        <div class="hint">Order is always: <strong>Scope – Turn – Location – Level</strong>. Material column is ignored.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>How column detection works</summary>
+        <div class="hint">
+          The formatter auto-maps your headers (case-insensitive). If a header named <code>Scope</code> is missing, it assumes the <em>first</emn> column is Scope. Location/Turn/Level must be present; Turn and Level should be numeric. Extra columns are ignored.
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <footer>Built for quick, repeatable pasting into QuickBooks Online bills.</footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function parseTSVorCSV(text){
+      // Prefer TSV if tabs exist. Otherwise do a light CSV parse (quotes + commas)
+      const hasTabs = text.includes("\t");
+      if (hasTabs){
+        return text.trim().split(/\r?\n/).map(line => line.split("\t"));
+      }
+      // Simple CSV parser that handles quoted fields
+      const rows = [];
+      let i=0, field='', row=[], inQuotes=false; const s = text.trim();
+      function pushField(){ row.push(field); field=''; }
+      for (; i < s.length; i++){
+        const c = s[i];
+        if (inQuotes){
+          if (c === '"'){
+            if (s[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; }
+          } else { field += c; }
+        } else {
+          if (c === '"'){ inQuotes = true; }
+          else if (c === ','){ pushField(); }
+          else if (c === '\n'){ pushField(); rows.push(row); row=[]; }
+          else if (c === '\r'){ /* skip */ }
+          else { field += c; }
+        }
+      }
+      pushField(); if (row.length) rows.push(row);
+      return rows;
+    }
+
+    function detectColumns(header){
+      const map = {};
+      header.forEach((h, idx) => {
+        const k = (h || '').toString().trim().toLowerCase();
+        if (k === 'scope') map.scope = idx;
+        if (k === 'location') map.location = idx;
+        if (k === 'turn') map.turn = idx;
+        if (k === 'level') map.level = idx;
+      });
+      if (map.scope === undefined) map.scope = 0; // assume first column is Scope if not labeled
+      return map;
+    }
+
+    function expandAbbrev(scope){
+      // Only modify scope if checkbox enabled
+      if (!$('#expandSchem').checked) return scope;
+      return scope
+        .replaceAll(/\bSchem\b/gi, 'Scheme')
+        .replaceAll(/\bSurr\b/gi, 'Surrounds');
+    }
+
+    function formatRows(rows){
+      if (!rows.length) return [];
+      const header = rows[0];
+      const {scope, location, turn, level} = detectColumns(header);
+      const output = [];
+      for (let r = 1; r < rows.length; r++){
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+        let s = (row[scope] ?? '').toString();
+        let loc = (row[location] ?? '').toString();
+        let t = (row[turn] ?? '').toString();
+        let lv = (row[level] ?? '').toString();
+
+        // Skip lines that have no essential pieces
+        if (!loc || !t || !lv) continue;
+
+        // Enforce trimming rules
+        s = s.trim();
+        if ($('#stripLocation').checked) loc = loc.replace(/[\s\u00A0]+$/g, ''); // strip trailing spaces only
+        t = t.toString().trim();
+        lv = lv.toString().trim();
+
+        // Abbreviation expansion in Scope only
+        s = expandAbbrev(s);
+
+        const line = `${s} - Turn ${t} - ${loc} - Level ${lv}`.trim();
+        output.push(line);
+      }
+
+      // Optional de-duplication
+      if ($('#dedupe').checked){
+        return Array.from(new Set(output));
+      }
+      return output;
+    }
+
+    function formatNow(text){
+      if (!text || !text.trim()){
+        $('#msg').textContent = 'Paste your table above or upload a CSV.';
+        $('#msg').className = 'hint';
+        return;
+      }
+      const rows = parseTSVorCSV(text);
+      const out = formatRows(rows);
+      $('#output').value = out.join('\n');
+      $('#msg').textContent = `Done. ${out.length} line(s) generated.`;
+      $('#msg').className = 'hint success';
+    }
+
+    $('#formatBtn').addEventListener('click', () => formatNow($('#input').value));
+
+    $('#copyBtn').addEventListener('click', async () => {
+      const text = $('#output').value;
+      if (!text) return;
+      try{ await navigator.clipboard.writeText(text); $('#msg').textContent = 'Copied to clipboard.'; $('#msg').className = 'hint success'; }
+      catch{ $('#output').select(); document.execCommand('copy'); $('#msg').textContent = 'Copied.'; $('#msg').className = 'hint success'; }
+    });
+
+    $('#downloadBtn').addEventListener('click', () => {
+      const text = $('#output').value || '';
+      const blob = new Blob([text], {type:'text/plain'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'qbo_descriptions.txt';
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    });
+
+    $('#file').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      $('#input').value = text;
+      formatNow(text);
+      e.target.value = '';
+    });
+
+    // Convenience: auto-format when pasting
+    $('#input').addEventListener('paste', (e) => {
+      setTimeout(()=> formatNow($('#input').value), 0);
+    });
+  </script>
+</body>
+</html>
